@@ -33,6 +33,7 @@ class PredictorBlock(nnx.Module):
         self.z_mlp_fc2 = nnx.Linear(config.latent_dim * mlp_ratio, config.latent_dim, rngs=rngs)
 
     def __call__(self, z, state):
+        # z: (B, Nz, latent_dim), state: (B, Ns, state_dim)
         z_n = self.z_norm(z)
         state_n = self.state_norm(state)
         state = state + self.state_cross_attn(state_n, z_n)
@@ -62,7 +63,8 @@ class Predictor(nnx.Module):
         ])
 
     def __call__(self, z: jax.Array, state: jax.Array, action: jax.Array):
-        a = self.action_embed(action)[:, None, :]
+        # z: (B, Nz, latent_dim), state: (B, Ns, state_dim), action: (B, action_dim)
+        a = self.action_embed(action)[:, None, :]     # (B, 1, latent_dim)
         z = z + a
 
         for block in self.blocks:

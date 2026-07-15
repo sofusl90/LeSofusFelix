@@ -78,22 +78,22 @@ class Encoder(nnx.Module):
         self.proj_bn = nnx.BatchNorm(config.encoder_dim, rngs=rngs)
 
 
-    def __call__(self, x: jax.Array):
-        x = self.patch_embeddings(x)
+    def __call__(self, x: jax.Array):                      # (B, H, W, C)
+        x = self.patch_embeddings(x)                       # (B, H/P, W/P, D)
         B, h, w, D = x.shape
-        x = x.reshape(B, h * w, D)
+        x = x.reshape(B, h * w, D)                         # (B, N, D)
 
         cls = jnp.broadcast_to(self.cls_token.value, (B, 1, D))
-        x = jnp.concatenate([cls, x], axis=1)
+        x = jnp.concatenate([cls, x], axis=1)              # (B, N+1, D)
         x = x + self.pos_embedding.value
 
         for block in self.blocks:
             x = block(x)
 
         x = self.final_norm(x)
-        x = x[:, 0]
+        x = x[:, 0]                                        # (B, D)
 
-        x = self.proj_bn(self.proj_linear(x))
+        x = self.proj_bn(self.proj_linear(x))              # (B, encoder_dim)
 
         return x
 
@@ -101,19 +101,20 @@ class Encoder(nnx.Module):
 
 
 def sigreg(proj, key, num_proj=1024, knots=17, t_max=3.0):
+    # proj: (..., B, d)
     *_, B, d = proj.shape
 
-    t = jnp.linspace(0.0, t_max, knots, dtype=jnp.float32)
+    t = jnp.linspace(0.0, t_max, knots, dtype=jnp.float32)                          # (knots,)
     dt = t_max / (knots - 1)
-    w = jnp.full((knots,), 2 * dt, dtype=jnp.float32).at[0].set(dt).at[-1].set(dt)
-    phi = jnp.exp(-0.5 * jnp.square(t))
+    w = jnp.full((knots,), 2 * dt, dtype=jnp.float32).at[0].set(dt).at[-1].set(dt)  # (knots,)
+    phi = jnp.exp(-0.5 * jnp.square(t))                                             # (knots,)
     weights = w * phi
 
-    A = jax.random.normal(key, (d, num_proj))
+    A = jax.random.normal(key, (d, num_proj))          # (d, num_proj)
     A = A / jnp.linalg.norm(A, axis=0)
 
-    x_t = (proj @ A)[..., None] * t
-    err = jnp.square(jnp.cos(x_t).mean(-3) - phi) + jnp.square(jnp.sin(x_t).mean(-3))
-    statistic = (err @ weights) * B
+    x_t = (proj @ A)[..., None] * t                    # (..., B, num_proj, knots)
+    err = jnp.square(jnp.cos(x_t).mean(-3) - phi) + jnp.square(jnp.sin(x_t).mean(-3))  # (..., num_proj, knots)
+    statistic = (err @ weights) * B                    # (..., num_proj)
 
-    return statistic.mean()
+    return statistic.mean()                            # scalar

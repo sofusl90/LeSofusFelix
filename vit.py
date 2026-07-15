@@ -38,18 +38,19 @@ class SIGReg(nnx.Module):
         self.weights = nnx.Variable(weights * window)
 
     def __call__(self, proj, key=None):
+        # proj: (..., N, d)
 
         # sample random projections -- fresh key on every call
         if key is None:
             key = self.rngs.sigreg()
-        A = jax.random.normal(key, (proj.shape[-1], self.num_proj))
+        A = jax.random.normal(key, (proj.shape[-1], self.num_proj))  # (d, num_proj)
         A = A / jnp.linalg.norm(A, axis=0)
         # compute the epps-pulley statistic
-        x_t = (proj @ A)[..., None] * self.t[...]
+        x_t = (proj @ A)[..., None] * self.t[...]                    # (..., N, num_proj, knots)
         err = jnp.square(jnp.cos(x_t).mean(-3) - self.phi[...]) + jnp.square(
             jnp.sin(x_t).mean(-3)
-        )
-        statistic = (err @ self.weights[...]) * proj.shape[-2]
+        )                                                            # (..., num_proj, knots)
+        statistic = (err @ self.weights[...]) * proj.shape[-2]       # (..., num_proj)
         return statistic.mean()  # average over projections and time
 
 

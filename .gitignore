@@ -219,3 +219,6 @@ __marimo__/
 
 # Extracted video frames
 frames.npy
+
+# Training run plots
+plots/

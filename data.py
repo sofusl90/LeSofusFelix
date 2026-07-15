@@ -20,15 +20,22 @@ def extract_frames(video, skip=50.0, fps=10, size=224):
     return frames
 
 
-def dataloader(batch_size, seq_len, action_dim=1, num_batches=1000, seed=0):
-    frames = np.load(FRAMES_PATH, mmap_mode="r")
-    rng = np.random.default_rng(seed)
-    actions = jnp.zeros((batch_size, seq_len, action_dim))
+class Dataloader:
+    """Yields `num_batches` random windows per iteration; re-iterable across epochs."""
 
-    for _ in range(num_batches):
-        starts = rng.integers(0, len(frames) - seq_len, batch_size)
-        obs = np.stack([frames[s : s + seq_len] for s in starts])
-        yield jnp.asarray(obs, dtype=jnp.float32) / 255.0, actions
+    def __init__(self, batch_size, seq_len, action_dim=1, num_batches=100, seed=0):
+        self.frames = np.load(FRAMES_PATH, mmap_mode="r")
+        self.batch_size = batch_size
+        self.seq_len = seq_len
+        self.num_batches = num_batches
+        self.actions = jnp.zeros((batch_size, seq_len, action_dim))
+        self.rng = np.random.default_rng(seed)
+
+    def __iter__(self):
+        for _ in range(self.num_batches):
+            starts = self.rng.integers(0, len(self.frames) - self.seq_len, self.batch_size)
+            obs = np.stack([self.frames[s : s + self.seq_len] for s in starts])
+            yield jnp.asarray(obs, dtype=jnp.float32) / 255.0, self.actions
 
 
 if __name__ == "__main__":

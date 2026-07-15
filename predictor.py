@@ -2,16 +2,24 @@ import jax.numpy as jnp
 from flax import nnx
 import jax
 
+from dataclasses import dataclass
+
+
+@dataclass
 class PredictorConfig:
     latent_dim: int
     state_dim: int
+    action_dim: int
+    num_state_tokens: int
+    mlp_ratio: int
     num_blocks: int
     dropout_rate: float
 
 
 class PredictorBlock(nnx.Module):
-    def __init__(self, config, mlp_ratio, rngs: nnx.Rngs):
+    def __init__(self, config: PredictorConfig, rngs: nnx.Rngs):
         qkv_dim = max(config.latent_dim, config.state_dim)
+        mlp_ratio = config.mlp_ratio
 
         self.z_norm = nnx.LayerNorm(config.latent_dim, rngs=rngs)
         self.state_norm = nnx.LayerNorm(config.state_dim, rngs=rngs)
@@ -52,14 +60,13 @@ class PredictorBlock(nnx.Module):
 
 
 class Predictor(nnx.Module):
-    def __init__(self, config, rngs: nnx.Rngs):
+    def __init__(self, config: PredictorConfig, rngs: nnx.Rngs):
         self.config = config
-        num_layers = config.num_layers
 
         self.action_embed = nnx.Linear(config.action_dim, config.latent_dim, rngs=rngs)
         self.blocks = nnx.List([
-            PredictorBlock(config.latent_dim, config.state_dim, rngs=rngs)
-            for _ in range(num_layers)
+            PredictorBlock(config, rngs=rngs)
+            for _ in range(config.num_blocks)
         ])
 
     def __call__(self, z: jax.Array, state: jax.Array, action: jax.Array):

@@ -2,6 +2,10 @@ import jax.numpy as jnp
 from flax import nnx
 import jax
 
+from dataclasses import dataclass
+
+
+@dataclass
 class EncoderConfig:
     image_size: int
     patch_size: int

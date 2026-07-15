@@ -2,14 +2,13 @@ import jax.numpy as jnp
 from flax import nnx
 import jax
 
-
 class EncoderConfig:
     image_size: int
     patch_size: int
     in_channels: int
     hidden_size: int
     num_heads: int
-    latent_dim: int
+    encoder_dim: int
     state_dim: int
     mlp_ratio: float
     num_blocks: int
@@ -75,8 +74,9 @@ class Encoder(nnx.Module):
 
         self.final_norm = nnx.LayerNorm(config.hidden_size, rngs=rngs)
 
-        self.proj_linear = nnx.Linear(config.hidden_size, config.embed_dim, rngs=rngs)
-        self.proj_bn = nnx.BatchNorm(config.embed_dim, rngs=rngs)
+        self.proj_linear = nnx.Linear(config.hidden_size, config.encoder_dim, rngs=rngs)
+        self.proj_bn = nnx.BatchNorm(config.encoder_dim, rngs=rngs)
+
 
     def __call__(self, x: jax.Array):
         x = self.patch_embeddings(x)
@@ -96,3 +96,24 @@ class Encoder(nnx.Module):
         x = self.proj_bn(self.proj_linear(x))
 
         return x
+
+
+
+
+def sigreg(proj, key, num_proj=1024, knots=17, t_max=3.0):
+    *_, B, d = proj.shape
+
+    t = jnp.linspace(0.0, t_max, knots, dtype=jnp.float32)
+    dt = t_max / (knots - 1)
+    w = jnp.full((knots,), 2 * dt, dtype=jnp.float32).at[0].set(dt).at[-1].set(dt)
+    phi = jnp.exp(-0.5 * jnp.square(t))
+    weights = w * phi
+
+    A = jax.random.normal(key, (d, num_proj))
+    A = A / jnp.linalg.norm(A, axis=0)
+
+    x_t = (proj @ A)[..., None] * t
+    err = jnp.square(jnp.cos(x_t).mean(-3) - phi) + jnp.square(jnp.sin(x_t).mean(-3))
+    statistic = (err @ weights) * B
+
+    return statistic.mean()

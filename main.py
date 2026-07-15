@@ -19,7 +19,7 @@ encoder_config = {
     "in_channels": 3,
     "hidden_size": 192,
     "num_heads": 3,
-    "latent_dim": ENCODER_DIM,
+    "encoder_dim": ENCODER_DIM,
     "state_dim": STATE_DIM,
     "mlp_ratio": 1,
     "num_blocks": 4,

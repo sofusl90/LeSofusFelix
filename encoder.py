@@ -98,7 +98,6 @@ class Encoder(nnx.Module):
         x = x[:, 0]                                        # (B, D)
 
         x = self.proj_bn(self.proj_linear(x))              # (B, encoder_dim)
-
         return x
 
 

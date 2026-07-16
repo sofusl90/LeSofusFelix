@@ -37,8 +37,9 @@ encoder_config = EncoderConfig(
 train_config = TrainConfig(
     adamw_lr=3e-4,
     epochs=100,
-    batch_size=8,
+    batch_size=32,
     seq_len=16,
+    sigreg_lambda=1.0,
 )
 
 

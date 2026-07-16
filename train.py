@@ -18,6 +18,7 @@ class TrainConfig:
     epochs: int
     batch_size: int
     seq_len: int
+    sigreg_lambda: float
 
 
 class LeWM(nnx.Module):
@@ -37,7 +38,21 @@ class LeWM(nnx.Module):
 
 
 
-def loss_fn(model: LeWM, obs, actions, key, lambd=0.1):
+def collapse_stats(emb):
+    """Healthy: eff_rank in the tens (of D), t_ratio well above 0, copy > pred."""
+    emb = jax.lax.stop_gradient(emb)
+    B, T, D = emb.shape
+    flat = emb.reshape(B * T, D)
+    c = flat - flat.mean(0)
+    eig = jnp.linalg.eigvalsh(c.T @ c / (B * T))
+    return {
+        "copy": jnp.mean(jnp.square(emb[:, 1:] - emb[:, :-1])),
+        "eff_rank": jnp.square(eig.sum()) / jnp.square(eig).sum(),
+        "t_ratio": jnp.var(emb, axis=1).mean() / jnp.var(flat, axis=0).mean(),
+    }
+
+
+def loss_fn(model: LeWM, obs, actions, key, lambd):
     emb = model.encode(obs)                      # (B, T, D)
     B, T, D = emb.shape
 
@@ -56,13 +71,14 @@ def loss_fn(model: LeWM, obs, actions, key, lambd=0.1):
 
     pred_loss = jnp.mean(jnp.square(preds - emb[:, 1:]))
     sig_loss = sigreg(emb.transpose(1, 0, 2), key)    # (T, B, D)
-    return pred_loss + lambd * sig_loss, {"pred": pred_loss, "sigreg": sig_loss}
+    metrics = {"pred": pred_loss, "sigreg": sig_loss, **collapse_stats(emb)}
+    return pred_loss + lambd * sig_loss, metrics
 
 
 @nnx.jit
-def train_step(model, optimizer, obs, actions, key):
+def train_step(model, optimizer, obs, actions, key, lambd):
     (loss, metrics), grads = nnx.value_and_grad(loss_fn, has_aux=True)(
-        model, obs, actions, key
+        model, obs, actions, key, lambd
     )
     optimizer.update(model, grads)
     return loss, metrics
@@ -92,8 +108,14 @@ def train(model, config, dataloader, key):
         start = len(step_losses)
         for obs, actions in dataloader:
             key, sk = jax.random.split(key)
-            loss, metrics = train_step(model, optimizer, obs, actions, sk)
+            loss, metrics = train_step(model, optimizer, obs, actions, sk, config.sigreg_lambda)
             step_losses.append(float(loss))
+            m = {k: float(v) for k, v in metrics.items()}
+            print(
+                f"step {len(step_losses) - 1:>5}  loss {float(loss):7.4f}  "
+                f"pred {m['pred']:7.4f}  copy {m['copy']:7.4f}  sigreg {m['sigreg']:6.3f}  "
+                f"rank {m['eff_rank']:5.1f}  tvar {m['t_ratio']:.3f}"
+            )
             save_loss_plot(step_losses, epoch_losses, run_dir / "loss.png")
 
         epoch = step_losses[start:]

@@ -51,6 +51,8 @@ class Dataloader:
     """
 
     def __init__(self, batch_size, seq_len, action_dim=1, num_batches=100, seed=0):
+        if not Path(FRAMES_PATH).exists():
+            build_dataset("videos", seq_len)
         self.frames = np.load(FRAMES_PATH, mmap_mode="r")
         self.starts = np.load(STARTS_PATH)
         self.batch_size = batch_size

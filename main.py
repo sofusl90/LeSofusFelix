@@ -2,6 +2,7 @@ import jax
 from flax import nnx
 
 from data import Dataloader
+from decoder import DecoderConfig
 from encoder import EncoderConfig
 from predictor import PredictorConfig
 from train import LeWM, TrainConfig, train
@@ -34,17 +35,26 @@ encoder_config = EncoderConfig(
     dropout_rate=0.1,
 )
 
+decoder_config = DecoderConfig(
+    latent_dim=ENCODER_DIM,
+    image_size=224,
+    base_size=7,
+    base_channels=256,
+    stage_channels=(128, 64, 32, 16, 8),
+)
+
 train_config = TrainConfig(
     adamw_lr=3e-4,
     epochs=100,
-    batch_size=32,
+    batch_size=8,
     seq_len=16,
     sigreg_lambda=1.0,
+    recon_lambda=1.0,
 )
 
 
 def run():
-    model = LeWM(encoder_config, predicter_config, rngs=nnx.Rngs(0))
+    model = LeWM(encoder_config, predicter_config, decoder_config, rngs=nnx.Rngs(0))
     key = jax.random.key(42)
     train(model, train_config, Dataloader(train_config.batch_size, train_config.seq_len), key)
 

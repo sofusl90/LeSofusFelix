@@ -21,7 +21,7 @@ python main.py <dataset> [--run NAME] [--config overrides.json]
 ```bash
 python main.py tworooms                    # new run, real actions
 python main.py tworooms --run baseline     # resume "baseline" if it exists
-python main.py tworooms --config over.json # new run with overrides
+python main.py tworooms --config over.json # new run with config overrides
 ```
 
 Each run writes checkpoints, plots, and a `config.json` snapshot under

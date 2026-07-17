@@ -20,21 +20,33 @@ directories, and the CLI selects a dataset preset and a run.
 
 ## CLI
 
-`main.py` grows an argparse interface; presets stay greppable in `main.py`
-(the run dir records which preset and its values, but code is the source of
-truth on resume — accepted trade-off for simplicity).
+`main.py` grows an argparse interface; per-dataset presets stay greppable in
+`main.py` as defaults, overridable per run via a config file.
 
 ```
-python main.py <dataset>              # new run, auto-named <dataset>_<timestamp>
-python main.py <dataset> --run NAME   # named run: create if missing, else resume
+python main.py <dataset>                     # new run, auto-named <dataset>_<timestamp>
+python main.py <dataset> --run NAME          # named run: create if missing, else resume
+python main.py <dataset> --config over.json  # new run with hyperparameter overrides
 ```
 
 - `<dataset>` ∈ `{breakout, tworooms}`.
-- New run: create `runs/NAME/`, write `config.json` (dataset name + full config
-  values as a record), train from scratch.
+- `--config` is a flat JSON dict of `TrainConfig` field overrides (e.g.
+  `{"adamw_lr": 1e-4, "sigreg_lambda": 0.2}`), merged over the dataset preset
+  at run creation. Unknown keys are an error. Architecture configs stay in
+  code — a config file can't change model shape, with one deliberate
+  exception: the model configs are derived from the resolved `TrainConfig`
+  where they overlap (`seq_len` → predictor positional embeddings,
+  `action_dim` from the dataset), so overrides propagate consistently.
+- New run: create `runs/NAME/`, resolve preset + overrides, write the resolved
+  values to `config.json` (dataset name + full `TrainConfig`), train from
+  scratch.
 - Resume: `runs/NAME/` exists → error if `config.json`'s dataset ≠ CLI dataset;
-  otherwise restore the latest checkpoint in that run and continue at the next
-  epoch (existing epoch-granularity resume logic, now scoped per run).
+  `--config` alongside an existing run is also an error (a run's
+  hyperparameters are fixed at creation). The run's `config.json` is the
+  source of truth on resume — code presets are only defaults for new runs, so
+  a resumed run never silently drops its overrides. Restore the latest
+  checkpoint and continue at the next epoch (existing epoch-granularity resume
+  logic, now scoped per run).
 
 ## Run layout
 
@@ -50,20 +62,27 @@ runs/<name>/
 `checkpoints/` and `plots/` are left untouched (legacy); new work happens under
 `runs/`.
 
-## Datasets
+## Dataset format (the contract)
 
-Both datasets are normalized by one-time build functions into the same on-disk
-triple under `data/<dataset>/`, consumed by a single `Dataloader`:
+Every dataset — current and future — is normalized by a one-time build
+function into the same on-disk layout under `data/<dataset>/`, and a single
+`Dataloader` consumes only this layout (it never touches videos or h5 files):
 
 ```
 data/<dataset>/frames.npy    # (N, 224, 224, 3) uint8, memmap'd at load
-data/<dataset>/actions.npy   # (N, A) float32 — action block from frame i to i+1
-data/<dataset>/starts.npy    # window starts that stay within one episode/clip
+data/<dataset>/actions.npy   # (N, A) float32 — action taken between frame i and i+1
+data/<dataset>/starts.npy    # (W,) int64 — window starts within one episode/clip
+data/<dataset>/meta.json     # {"action_dim": A, "num_frames": N, "source": ...}
 ```
 
-- **breakout** (existing video path): `build_dataset` moves its outputs to
-  `data/breakout/`; `actions.npy` is zeros with A=1 (no recorded actions).
-  Existing root `frames.npy`/`starts.npy` can be moved there to skip a rebuild.
+Actions are mandatory: a dataset without recorded actions must still emit
+`actions.npy`, filled with zeros. `action_dim` lives in `meta.json` and flows
+from there into the predictor config — it is a property of the dataset, not a
+preset value, so the model and data can never disagree on it.
+
+- **breakout** (existing video path): `build_dataset` retargets its outputs to
+  `data/breakout/` and emits zero actions with A=1. Existing root
+  `frames.npy`/`starts.npy` can be moved there to skip a rebuild.
 - **tworooms** (new): read `tworoom.h5` (`h5py` + `hdf5plugin`, imported only
   inside the build function) sequentially — random access into the Blosc
   chunks is ~5.5 s per batch, hence the one-time re-materialization. Apply the
@@ -87,8 +106,10 @@ Per-dataset values in `main.py`; everything not listed is shared:
 |---|---|---|
 | seq_len | 8 | 4 |
 | batch_size | 32 | 128 |
-| action_dim | 1 | 10 |
 | sigreg_lambda | 0.4 | 0.1 (paper) |
+
+(`action_dim` is not a preset — it comes from the dataset's `meta.json`:
+1 for breakout, 10 for tworooms.)
 
 tworooms matches the LeWM paper's TwoRoom recipe (224×224, T=4, B=128,
 frame-skip 5 with action blocks, λ=0.1, per-timestep SIGReg) so results are
@@ -105,6 +126,9 @@ is part of this work's verification, not a code change committed blindly).
 ## Error handling
 
 - Unknown dataset name → argparse choices error.
+- Unknown keys in a `--config` file → error listing the offending keys.
+- `--config` passed together with an existing run → error (hyperparameters are
+  fixed at run creation).
 - Resume with mismatched dataset → clear error naming the run's dataset.
 - Missing source data (no `videos/`, no `tworoom.h5`) → existing/explicit
   `ValueError` from the build functions.
@@ -115,6 +139,8 @@ is part of this work's verification, not a code change committed blindly).
   real h5 (spot-check a few episodes: frame indices, action-block alignment,
   no NaNs in `actions.npy`, no window crossing an episode).
 - CLI: new run creates the layout; rerun with same `--run` resumes at the next
-  epoch; mismatched dataset errors.
+  epoch with the run's own `config.json` values (not code defaults);
+  mismatched dataset errors; `--config` overrides land in the snapshot and
+  unknown keys error.
 - End-to-end: short tworooms training run; watch `copy` vs `pred`, `rank`,
   `tvar` for the collapse signature.

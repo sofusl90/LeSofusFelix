@@ -59,7 +59,28 @@ def build_breakout(root, video_dir="videos"):
     write_meta(root, 1, len(frames), video_dir)
 
 
-def build_tworooms(root, h5_path="data/lewm-tworooms/tworoom.h5", frame_skip=5):
+def fetch_tworooms_h5(dest=DATA_ROOT / "lewm-tworooms"):
+    """Return the LeWM TwoRoom source h5, downloading it from HuggingFace on
+    first use (the ~3.4 GB archive isn't in git). Idempotent: a present h5 is
+    returned untouched.
+    """
+    h5 = dest / "tworoom.h5"
+    if not h5.exists():
+        from huggingface_hub import hf_hub_download
+
+        dest.mkdir(parents=True, exist_ok=True)
+        print("downloading tworooms source from HuggingFace (~3.4 GB)...")
+        archive = hf_hub_download(
+            "quentinll/lewm-tworooms", "tworoom.tar.zst",
+            repo_type="dataset", local_dir=dest,
+        )
+        print("extracting...")
+        subprocess.run(["tar", "--zstd", "-xf", archive, "-C", dest], check=True)
+        Path(archive).unlink()  # drop the transport archive; the h5 stays
+    return h5
+
+
+def build_tworooms(root, frame_skip=5):
     """Re-materialize the LeWM TwoRoom h5 into the dataset contract: keep every
     `frame_skip`-th frame per episode and concatenate the raw actions in between
     into one block per kept transition (the paper's action-block scheme). The
@@ -70,6 +91,7 @@ def build_tworooms(root, h5_path="data/lewm-tworooms/tworoom.h5", frame_skip=5):
     import h5py
     import hdf5plugin  # noqa: F401 -- registers the Blosc filter h5py lacks
 
+    h5_path = fetch_tworooms_h5()
     f = h5py.File(h5_path, "r", rdcc_nbytes=32 * 2**20)
     pixels = f["pixels"]
     action = f["action"][:].astype(np.float32)

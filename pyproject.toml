@@ -8,6 +8,7 @@ dependencies = [
     "flax>=0.12.7",
     "h5py>=3.16.0",
     "hdf5plugin>=7.0.0",
+    "huggingface-hub>=1.24.0",
     "jax>=0.10.1",
     "matplotlib>=3.11.0",
     "optax>=0.2.8",

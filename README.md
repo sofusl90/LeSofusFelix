@@ -1,7 +1,6 @@
 # LeSofusFelix
 
-A LeJEPA-style world model (ViT encoder + causal predictor, SIGReg anti-collapse)
-trained on video with actions.
+A LeJEPA-style world model with a new take on planning.
 
 ## Training
 
@@ -9,8 +8,9 @@ trained on video with actions.
 python main.py <dataset> [--run NAME] [--config overrides.json]
 ```
 
-- `<dataset>` is `breakout` or `tworooms`; it's built from source into
-  `data/<dataset>/` on first use.
+- `<dataset>` is `breakout` or `tworooms`; it's built into `data/<dataset>/`
+  on first use. `breakout` ships with the repo; `tworooms` is downloaded from
+  HuggingFace automatically (~3.4 GB, once).
 - `--run NAME` names the run under `runs/NAME/`. Rerunning the same name
   resumes from its latest checkpoint; omit it and a timestamped run is created.
 - `--config` points at a JSON file of hyperparameter overrides applied when a

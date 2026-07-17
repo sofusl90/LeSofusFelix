@@ -7,18 +7,17 @@ from encoder import EncoderConfig
 from predictor import PredictorConfig
 from train import LeWM, TrainConfig, train
 
-STATE_DIM = 64
-ENCODER_DIM = 64
-LATENT_DIM = STATE_DIM + ENCODER_DIM
+
+LATENT_DIM = 96
 
 
 predicter_config = PredictorConfig(
     latent_dim=LATENT_DIM,
-    state_dim=STATE_DIM,
     action_dim=1,
-    num_state_tokens=8,
-    mlp_ratio=4,
-    num_blocks=4,
+    num_heads=8,
+    dim_head=64,
+    mlp_dim=1024,
+    num_blocks=6,
     dropout_rate=0.1,
 )
 
@@ -28,15 +27,14 @@ encoder_config = EncoderConfig(
     in_channels=3,
     hidden_size=192,
     num_heads=3,
-    encoder_dim=ENCODER_DIM,
-    state_dim=STATE_DIM,
-    mlp_ratio=1,
-    num_blocks=4,
+    encoder_dim=LATENT_DIM,
+    mlp_ratio=4,
+    num_blocks=8,
     dropout_rate=0.1,
 )
 
 decoder_config = DecoderConfig(
-    latent_dim=ENCODER_DIM,
+    latent_dim=LATENT_DIM,
     image_size=224,
     base_size=7,
     base_channels=256,

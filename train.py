@@ -31,9 +31,6 @@ class LeWM(nnx.Module):
         self.encoder = Encoder(enc_config, rngs=rngs)
         self.predictor = Predictor(pred_config, rngs=rngs)
         self.decoder = Decoder(dec_config, rngs=rngs)
-        self.init_state = nnx.Param(
-            jnp.zeros((1, pred_config.num_state_tokens, pred_config.state_dim))
-        )
 
     def encode(self, obs, chunk_size=128):             # (B, T, H, W, C)
         B, T = obs.shape[:2]
@@ -70,41 +67,12 @@ def collapse_stats(emb):
     }
 
 
-def rollout_predictor(model: LeWM, emb, actions, carry_state: bool):
-    """Predict emb[:, 1:] from emb[:, :-1]. If carry_state, the persistent multi-token
-    `state` accumulates across steps as usual; if not, it's reset to init_state every
-    step, ablating the persistent memory so only the single-vector z_state (LeWorldModel's
-    own carry) is available -- this isolates what the added persistent state contributes.
-    """
-    B, T, D = emb.shape
-    init_state = jnp.broadcast_to(
-        model.init_state.value, (B, *model.init_state.value.shape[1:])
-    )                                                 # (B, Ns, state_dim)
-    state = init_state
-    z_state = jnp.zeros((B, model.predictor.config.state_dim))
-
-    preds = []
-    for t in range(T - 1):
-        z_t = jnp.concatenate([emb[:, t], z_state], axis=-1)[:, None, :]  # (B, 1, D + state_dim)
-        z_hat, new_state = model.predictor(z_t, state, actions[:, t])
-        state = new_state if carry_state else init_state
-        preds.append(z_hat[:, 0, :D])                 # (B, D)
-        z_state = z_hat[:, 0, D:]                     # (B, state_dim)
-    return jnp.stack(preds, axis=1)                   # (B, T-1, D)
-
-
 def loss_fn(model: LeWM, obs, actions, key, sigreg_lambd, recon_lambd):
-    emb = model.encode(obs)                      # (B, T, D)
+    emb = model.encode(obs)                           # (B, T, D)
+    T = emb.shape[1]
 
-    preds = rollout_predictor(model, emb, actions, carry_state=True)
-    pred_loss = jnp.mean(jnp.square(preds - emb[:, 1:]))
-
-    # diagnostic only: does carrying the persistent state actually help prediction?
-    # (not part of `loss`, so this never affects training -- purely observational)
-    frozen_emb = jax.lax.stop_gradient(emb)
-    no_state_preds = rollout_predictor(model, frozen_emb, actions, carry_state=False)
-    no_state_pred_loss = jnp.mean(jnp.square(no_state_preds - frozen_emb[:, 1:]))
-
+    z_hat = model.predictor(emb[:, :T-1], actions[:, :T-1])
+    pred_loss = jnp.mean(jnp.square(z_hat - emb[:, 1:]))
     sig_loss = sigreg(emb.transpose(1, 0, 2), key)    # (T, B, D)
 
     # visualization-only probe: decoder must not shape the encoder's representation
@@ -113,8 +81,6 @@ def loss_fn(model: LeWM, obs, actions, key, sigreg_lambd, recon_lambd):
 
     metrics = {
         "pred": pred_loss,
-        "pred_no_state": no_state_pred_loss,
-        "state_gain": no_state_pred_loss - pred_loss,  # positive => state is helping
         "sigreg": sig_loss,
         "recon": recon_loss,
         **collapse_stats(emb),
@@ -215,8 +181,7 @@ def train(model, config, dataloader, key):
             m = {k: float(v) for k, v in metrics.items()}
             print(
                 f"step {len(step_losses) - 1:>5}  loss {float(loss):7.4f}  "
-                f"pred {m['pred']:7.4f}  no_state {m['pred_no_state']:7.4f}  "
-                f"state_gain {m['state_gain']:+7.4f}  copy {m['copy']:7.4f}  sigreg {m['sigreg']:6.3f}  "
+                f"pred {m['pred']:7.4f}  copy {m['copy']:7.4f}  sigreg {m['sigreg']:6.3f}  "
                 f"recon {m['recon']:7.4f}  rank {m['eff_rank']:5.1f}  tvar {m['t_ratio']:.3f}"
             )
             save_loss_plot(step_losses, epoch_losses, run_dir / "loss.png")

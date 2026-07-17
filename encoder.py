@@ -13,7 +13,6 @@ class EncoderConfig:
     hidden_size: int
     num_heads: int
     encoder_dim: int
-    state_dim: int
     mlp_ratio: float
     num_blocks: int
     dropout_rate: float

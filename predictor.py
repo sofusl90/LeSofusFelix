@@ -1,62 +1,71 @@
-import jax.numpy as jnp
 from flax import nnx
 import jax
+import jax.numpy as jnp
 
 from dataclasses import dataclass
 
 
+def modulate(x: jax.Array, shift: jax.Array, scale: jax.Array):
+    return x * (1 + scale) + shift
+
+
+
 @dataclass
-class PredictorConfig:
-    latent_dim: int
-    state_dim: int
+class PredictorConfig:   # The paper uses these configs
+    latent_dim: int      # 192
     action_dim: int
-    num_state_tokens: int
-    mlp_ratio: int
-    num_blocks: int
-    dropout_rate: float
+    num_heads: int       # 16
+    dim_head: int        # 64
+    mlp_dim: int         # 2048
+    num_blocks: int      # 6
+    dropout_rate: float  # 0.1
 
 
 class PredictorBlock(nnx.Module):
     def __init__(self, config: PredictorConfig, rngs: nnx.Rngs):
-        qkv_dim = max(config.latent_dim, config.state_dim)
-        mlp_ratio = config.mlp_ratio
 
-        self.z_norm = nnx.LayerNorm(config.latent_dim, rngs=rngs)
-        self.state_norm = nnx.LayerNorm(config.state_dim, rngs=rngs)
+        self.norm1 = nnx.LayerNorm(config.latent_dim, use_scale=False, use_bias=False, rngs=rngs)
+        self.attn = nnx.MultiHeadAttention(
+            num_heads=config.num_heads,
+            in_features=config.latent_dim,
+            qkv_features=config.num_heads * config.dim_head,
+            out_features=config.latent_dim,
+            decode=False,
+            dropout_rate=config.dropout_rate,
+            rngs=rngs,
+        )
+        self.norm2 = nnx.LayerNorm(config.latent_dim, use_scale=False, use_bias=False, rngs=rngs)
+        self.mlp = nnx.Sequential(
+            nnx.Linear(config.latent_dim, config.mlp_dim, rngs=rngs),
+            nnx.gelu,
+            nnx.Linear(config.mlp_dim, config.latent_dim, rngs=rngs),
+        )
 
-        self.state_cross_attn = nnx.MultiHeadAttention(
-            num_heads=8, in_features=config.state_dim, in_kv_features=config.latent_dim,
-            qkv_features=qkv_dim, out_features=config.state_dim, decode=False, rngs=rngs)
+        self.adaLN_modulation = nnx.Linear(
+            config.latent_dim,
+            6 * config.latent_dim,
+            kernel_init=nnx.initializers.zeros_init(),
+            bias_init=nnx.initializers.zeros_init(),
+            rngs=rngs,
+        )
 
-        self.z_pred_attn = nnx.MultiHeadAttention(
-            num_heads=8, in_features=config.latent_dim, in_kv_features=config.state_dim,
-            qkv_features=qkv_dim, out_features=config.latent_dim, decode=False, rngs=rngs)
+    def __call__(self, x: jax.Array, cs: jax.Array):
+        mask = jnp.tril(jnp.ones((x.shape[1], x.shape[1])))
 
-        self.state_mlp_norm = nnx.LayerNorm(config.state_dim, rngs=rngs)
-        self.state_mlp_fc1 = nnx.Linear(config.state_dim, config.state_dim * mlp_ratio, rngs=rngs)
-        self.state_mlp_fc2 = nnx.Linear(config.state_dim * mlp_ratio, config.state_dim, rngs=rngs)
+        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = jnp.split(self.adaLN_modulation(jax.nn.silu(cs)), 6, axis=-1)
 
-        self.z_mlp_norm = nnx.LayerNorm(config.latent_dim, rngs=rngs)
-        self.z_mlp_fc1 = nnx.Linear(config.latent_dim, config.latent_dim * mlp_ratio, rngs=rngs)
-        self.z_mlp_fc2 = nnx.Linear(config.latent_dim * mlp_ratio, config.latent_dim, rngs=rngs)
+        residual = x
+        x = self.norm1(x)
+        x = modulate(x, shift_msa, scale_msa)
+        x = residual + gate_msa * self.attn(x, mask=mask)
+        residual = x
 
-    def __call__(self, z, state):
-        # z: (B, Nz, latent_dim), state: (B, Ns, state_dim)
-        z_n = self.z_norm(z)
-        state_n = self.state_norm(state)
-        state = state + self.state_cross_attn(state_n, z_n)
 
-        state_n2 = self.state_mlp_norm(state)
-        state = state + self.state_mlp_fc2(nnx.gelu(self.state_mlp_fc1(state_n2)))
+        x = self.norm2(x)
+        x = modulate(x, shift_mlp, scale_mlp)
+        x = residual + gate_mlp * self.mlp(x)
 
-        z_n2 = self.z_norm(z)
-        state_n3 = self.state_norm(state)
-        z = z + self.z_pred_attn(z_n2, state_n3)
-
-        z_n3 = self.z_mlp_norm(z)
-        z = z + self.z_mlp_fc2(nnx.gelu(self.z_mlp_fc1(z_n3)))
-
-        return z, state
+        return x
 
 
 class Predictor(nnx.Module):
@@ -69,12 +78,10 @@ class Predictor(nnx.Module):
             for _ in range(config.num_blocks)
         ])
 
-    def __call__(self, z: jax.Array, state: jax.Array, action: jax.Array):
-        # z: (B, Nz, latent_dim), state: (B, Ns, state_dim), action: (B, action_dim)
-        a = self.action_embed(action)[:, None, :]     # (B, 1, latent_dim)
-        z = z + a
-
+    def __call__(self, z: jax.Array, cs: jax.Array):
+        # z: (B, T, latent_dim), cs: (B, T, action_dim)
+        cs = self.action_embed(cs)
         for block in self.blocks:
-            z, state = block(z, state)
+            z = block(z, cs)
 
-        return z, state
+        return z

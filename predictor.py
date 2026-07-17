@@ -19,6 +19,8 @@ class PredictorConfig:   # The paper uses these configs
     mlp_dim: int         # 2048
     num_blocks: int      # 6
     dropout_rate: float  # 0.1
+    seq_len: int
+    proj_hidden_dim: int # 2048
 
 
 class PredictorBlock(nnx.Module):
@@ -72,16 +74,25 @@ class Predictor(nnx.Module):
     def __init__(self, config: PredictorConfig, rngs: nnx.Rngs):
         self.config = config
 
-        self.action_embed = nnx.Linear(config.action_dim, config.latent_dim, rngs=rngs)
+        self.action_embed = nnx.Sequential(
+            nnx.Linear(config.action_dim, config.latent_dim, rngs=rngs),
+            jax.nn.silu,
+            nnx.Linear(config.latent_dim, config.latent_dim, rngs=rngs),
+        )
         self.blocks = nnx.List([
             PredictorBlock(config, rngs=rngs)
             for _ in range(config.num_blocks)
         ])
+        self.pos_embedding = nnx.Param(
+            jax.random.normal(rngs.params(), (1, config.seq_len, config.latent_dim)) * 0.02
+        )
+        self.final_norm = nnx.LayerNorm(config.latent_dim, rngs=rngs)
 
     def __call__(self, z: jax.Array, cs: jax.Array):
         # z: (B, T, latent_dim), cs: (B, T, action_dim)
+        z = z + self.pos_embedding[:, :z.shape[1]]
         cs = self.action_embed(cs)
         for block in self.blocks:
             z = block(z, cs)
 
-        return z
+        return self.final_norm(z)

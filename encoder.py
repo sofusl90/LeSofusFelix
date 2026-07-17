@@ -13,6 +13,7 @@ class EncoderConfig:
     hidden_size: int
     num_heads: int
     encoder_dim: int
+    proj_hidden_dim: int
     mlp_ratio: float
     num_blocks: int
     dropout_rate: float
@@ -21,6 +22,19 @@ class EncoderConfig:
     def mlp_dim(self) -> int:
         return int(self.hidden_size * self.mlp_ratio)
 
+
+
+class Projector(nnx.Module):
+    def __init__(self, in_dim: int, hidden_dim: int, out_dim: int, rngs: nnx.Rngs):
+        self.net = nnx.Sequential(
+            nnx.Linear(in_dim, hidden_dim, rngs=rngs),
+            nnx.BatchNorm(hidden_dim, rngs=rngs),
+            nnx.gelu,
+            nnx.Linear(hidden_dim, out_dim, rngs=rngs),
+        )
+
+    def __call__(self, x):
+        return self.net(x)
 
 
 class EncoderBlock(nnx.Module):
@@ -77,8 +91,9 @@ class Encoder(nnx.Module):
 
         self.final_norm = nnx.LayerNorm(config.hidden_size, rngs=rngs)
 
-        self.proj_linear = nnx.Linear(config.hidden_size, config.encoder_dim, rngs=rngs)
-        self.proj_bn = nnx.BatchNorm(config.encoder_dim, rngs=rngs)
+        self.projector = Projector(
+            config.hidden_size, config.proj_hidden_dim, config.encoder_dim, rngs=rngs
+        )
 
 
     def __call__(self, x: jax.Array):                      # (B, H, W, C)
@@ -96,7 +111,7 @@ class Encoder(nnx.Module):
         x = self.final_norm(x)
         x = x[:, 0]                                        # (B, D)
 
-        x = self.proj_bn(self.proj_linear(x))              # (B, encoder_dim)
+        x = self.projector(x)                              # (B, encoder_dim)
         return x
 
 

@@ -9,7 +9,7 @@ from train import LeWM, TrainConfig, train
 
 
 LATENT_DIM = 96
-
+SEQ_LEN = 16
 
 predicter_config = PredictorConfig(
     latent_dim=LATENT_DIM,
@@ -19,6 +19,8 @@ predicter_config = PredictorConfig(
     mlp_dim=1024,
     num_blocks=6,
     dropout_rate=0.1,
+    seq_len=SEQ_LEN,
+    proj_hidden_dim=1024,
 )
 
 encoder_config = EncoderConfig(
@@ -28,6 +30,7 @@ encoder_config = EncoderConfig(
     hidden_size=192,
     num_heads=3,
     encoder_dim=LATENT_DIM,
+    proj_hidden_dim=1024,
     mlp_ratio=4,
     num_blocks=8,
     dropout_rate=0.1,
@@ -45,8 +48,8 @@ train_config = TrainConfig(
     adamw_lr=3e-4,
     epochs=100,
     batch_size=8,
-    seq_len=16,
-    sigreg_lambda=1.0,
+    seq_len=SEQ_LEN,
+    sigreg_lambda=0.4,
     recon_lambda=1.0,
 )
 

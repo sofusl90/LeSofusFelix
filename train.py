@@ -1,6 +1,6 @@
 import optax
 from flax import nnx
-from encoder import Encoder, sigreg
+from encoder import Encoder, Projector, sigreg
 from predictor import Predictor
 from decoder import Decoder
 import jax.numpy as jnp
@@ -30,6 +30,10 @@ class LeWM(nnx.Module):
     def __init__(self, enc_config, pred_config, dec_config, rngs: nnx.Rngs):
         self.encoder = Encoder(enc_config, rngs=rngs)
         self.predictor = Predictor(pred_config, rngs=rngs)
+        self.pred_proj = Projector(
+            pred_config.latent_dim, pred_config.proj_hidden_dim,
+            pred_config.latent_dim, rngs=rngs,
+        )
         self.decoder = Decoder(dec_config, rngs=rngs)
 
     def encode(self, obs, chunk_size=128):             # (B, T, H, W, C)
@@ -71,7 +75,7 @@ def loss_fn(model: LeWM, obs, actions, key, sigreg_lambd, recon_lambd):
     emb = model.encode(obs)                           # (B, T, D)
     T = emb.shape[1]
 
-    z_hat = model.predictor(emb[:, :T-1], actions[:, :T-1])
+    z_hat = model.pred_proj(model.predictor(emb[:, :T-1], actions[:, :T-1]))
     pred_loss = jnp.mean(jnp.square(z_hat - emb[:, 1:]))
     sig_loss = sigreg(emb.transpose(1, 0, 2), key)    # (T, B, D)
 

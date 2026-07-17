@@ -1,4 +1,5 @@
 import jax
+import jax.numpy as jnp
 from flax import nnx
 
 from data import Dataloader
@@ -21,6 +22,7 @@ predicter_config = PredictorConfig(
     dropout_rate=0.1,
     seq_len=SEQ_LEN,
     proj_hidden_dim=1024,
+    dtype=jnp.bfloat16,
 )
 
 encoder_config = EncoderConfig(
@@ -34,6 +36,7 @@ encoder_config = EncoderConfig(
     mlp_ratio=4,
     num_blocks=8,
     dropout_rate=0.1,
+    dtype=jnp.bfloat16,
 )
 
 decoder_config = DecoderConfig(
@@ -42,6 +45,7 @@ decoder_config = DecoderConfig(
     base_size=7,
     base_channels=256,
     stage_channels=(128, 64, 32, 16, 8),
+    dtype=jnp.bfloat16,
 )
 
 train_config = TrainConfig(
@@ -51,6 +55,9 @@ train_config = TrainConfig(
     seq_len=SEQ_LEN,
     sigreg_lambda=0.4,
     recon_lambda=1.0,
+    weight_decay=1e-3,
+    grad_clip=1.0,
+    warmup_steps=500,
 )
 
 

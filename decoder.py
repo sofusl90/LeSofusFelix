@@ -13,6 +13,7 @@ class DecoderConfig:
     base_channels: int          # channel count right after the latent is projected, e.g. 256
     stage_channels: tuple       # output channels of each upsampling stage, e.g. (128, 64, 32, 16, 8)
     out_channels: int = 3
+    dtype: jnp.dtype = jnp.float32
 
     def __post_init__(self):
         num_stages = len(self.stage_channels)
@@ -22,12 +23,14 @@ class DecoderConfig:
 
 
 class UpBlock(nnx.Module):
-    def __init__(self, in_channels: int, out_channels: int, rngs: nnx.Rngs):
+    def __init__(self, in_channels: int, out_channels: int, rngs: nnx.Rngs,
+                 dtype: jnp.dtype = jnp.float32):
         self.conv = nnx.ConvTranspose(
             in_channels, out_channels, kernel_size=(4, 4), strides=(2, 2),
-            padding="SAME", rngs=rngs,
+            padding="SAME", dtype=dtype, rngs=rngs,
         )
-        self.norm = nnx.GroupNorm(out_channels, num_groups=min(32, out_channels), rngs=rngs)
+        self.norm = nnx.GroupNorm(out_channels, num_groups=min(32, out_channels),
+                                  dtype=dtype, rngs=rngs)
 
     def __call__(self, x):
         x = self.conv(x)
@@ -39,17 +42,19 @@ class Decoder(nnx.Module):
     def __init__(self, config: DecoderConfig, rngs: nnx.Rngs):
         self.config = config
         self.input_proj = nnx.Linear(
-            config.latent_dim, config.base_size * config.base_size * config.base_channels, rngs=rngs
+            config.latent_dim, config.base_size * config.base_size * config.base_channels,
+            dtype=config.dtype, rngs=rngs,
         )
 
         channels = [config.base_channels, *config.stage_channels]
         self.blocks = nnx.List([
-            UpBlock(channels[i], channels[i + 1], rngs=rngs)
+            UpBlock(channels[i], channels[i + 1], rngs=rngs, dtype=config.dtype)
             for i in range(len(config.stage_channels))
         ])
 
         self.out_conv = nnx.Conv(
-            channels[-1], config.out_channels, kernel_size=(3, 3), padding="SAME", rngs=rngs
+            channels[-1], config.out_channels, kernel_size=(3, 3), padding="SAME",
+            dtype=config.dtype, rngs=rngs,
         )
 
     def __call__(self, z: jax.Array):                              # (B, latent_dim)

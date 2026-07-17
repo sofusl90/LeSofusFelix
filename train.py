@@ -24,6 +24,9 @@ class TrainConfig:
     seq_len: int
     sigreg_lambda: float
     recon_lambda: float
+    weight_decay: float
+    grad_clip: float
+    warmup_steps: int
 
 
 class LeWM(nnx.Module):
@@ -32,7 +35,7 @@ class LeWM(nnx.Module):
         self.predictor = Predictor(pred_config, rngs=rngs)
         self.pred_proj = Projector(
             pred_config.latent_dim, pred_config.proj_hidden_dim,
-            pred_config.latent_dim, rngs=rngs,
+            pred_config.latent_dim, rngs=rngs, dtype=pred_config.dtype,
         )
         self.decoder = Decoder(dec_config, rngs=rngs)
 
@@ -72,15 +75,15 @@ def collapse_stats(emb):
 
 
 def loss_fn(model: LeWM, obs, actions, key, sigreg_lambd, recon_lambd):
-    emb = model.encode(obs)                           # (B, T, D)
+    emb = model.encode(obs).astype(jnp.float32)       # (B, T, D)
     T = emb.shape[1]
 
     z_hat = model.pred_proj(model.predictor(emb[:, :T-1], actions[:, :T-1]))
-    pred_loss = jnp.mean(jnp.square(z_hat - emb[:, 1:]))
+    pred_loss = jnp.mean(jnp.square(z_hat.astype(jnp.float32) - emb[:, 1:]))
     sig_loss = sigreg(emb.transpose(1, 0, 2), key)    # (T, B, D)
 
     # visualization-only probe: decoder must not shape the encoder's representation
-    recon = model.decode(jax.lax.stop_gradient(emb))  # (B, T, H, W, C)
+    recon = model.decode(jax.lax.stop_gradient(emb)).astype(jnp.float32)  # (B, T, H, W, C)
     recon_loss = jnp.mean(jnp.square(recon - obs))
 
     metrics = {
@@ -158,7 +161,17 @@ def save_loss_plot(step_losses, epoch_losses, path):
 
 
 def train(model, config, dataloader, key):
-    optimizer = nnx.Optimizer(model, optax.adamw(config.adamw_lr), wrt=nnx.Param)
+    schedule = optax.warmup_cosine_decay_schedule(
+        init_value=0.0,
+        peak_value=config.adamw_lr,
+        warmup_steps=config.warmup_steps,
+        decay_steps=config.epochs * dataloader.num_batches,
+    )
+    tx = optax.chain(
+        optax.clip_by_global_norm(config.grad_clip),
+        optax.adamw(schedule, weight_decay=config.weight_decay),
+    )
+    optimizer = nnx.Optimizer(model, tx, wrt=nnx.Param)
     model.train()
 
     ckpt_mngr = ocp.CheckpointManager(

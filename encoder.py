@@ -17,6 +17,7 @@ class EncoderConfig:
     mlp_ratio: float
     num_blocks: int
     dropout_rate: float
+    dtype: jnp.dtype = jnp.float32
 
     @property
     def mlp_dim(self) -> int:
@@ -25,12 +26,13 @@ class EncoderConfig:
 
 
 class Projector(nnx.Module):
-    def __init__(self, in_dim: int, hidden_dim: int, out_dim: int, rngs: nnx.Rngs):
+    def __init__(self, in_dim: int, hidden_dim: int, out_dim: int, rngs: nnx.Rngs,
+                 dtype: jnp.dtype = jnp.float32):
         self.net = nnx.Sequential(
-            nnx.Linear(in_dim, hidden_dim, rngs=rngs),
-            nnx.BatchNorm(hidden_dim, rngs=rngs),
+            nnx.Linear(in_dim, hidden_dim, dtype=dtype, rngs=rngs),
+            nnx.BatchNorm(hidden_dim, dtype=dtype, rngs=rngs),
             nnx.gelu,
-            nnx.Linear(hidden_dim, out_dim, rngs=rngs),
+            nnx.Linear(hidden_dim, out_dim, dtype=dtype, rngs=rngs),
         )
 
     def __call__(self, x):
@@ -39,19 +41,20 @@ class Projector(nnx.Module):
 
 class EncoderBlock(nnx.Module):
     def __init__(self, config: EncoderConfig, rngs: nnx.Rngs):
-        self.norm1 = nnx.LayerNorm(config.hidden_size, rngs=rngs)
+        self.norm1 = nnx.LayerNorm(config.hidden_size, dtype=config.dtype, rngs=rngs)
         self.attn = nnx.MultiHeadAttention(
             num_heads=config.num_heads,
             in_features=config.hidden_size,
             qkv_features=config.hidden_size,
             decode=False,
+            dtype=config.dtype,
             rngs=rngs,
         )
-        self.norm2 = nnx.LayerNorm(config.hidden_size, rngs=rngs)
+        self.norm2 = nnx.LayerNorm(config.hidden_size, dtype=config.dtype, rngs=rngs)
         self.mlp = nnx.Sequential(
-            nnx.Linear(config.hidden_size, config.mlp_dim, rngs=rngs),
+            nnx.Linear(config.hidden_size, config.mlp_dim, dtype=config.dtype, rngs=rngs),
             nnx.gelu,
-            nnx.Linear(config.mlp_dim, config.hidden_size, rngs=rngs),
+            nnx.Linear(config.mlp_dim, config.hidden_size, dtype=config.dtype, rngs=rngs),
         )
 
     def __call__(self, x):
@@ -70,6 +73,7 @@ class Encoder(nnx.Module):
                     strides=(config.patch_size, config.patch_size),
                     padding="VALID",
                     use_bias=True,
+                    dtype=config.dtype,
                     rngs=rngs,
                 )
 
@@ -89,10 +93,11 @@ class Encoder(nnx.Module):
             for _ in range(config.num_blocks)
         ])
 
-        self.final_norm = nnx.LayerNorm(config.hidden_size, rngs=rngs)
+        self.final_norm = nnx.LayerNorm(config.hidden_size, dtype=config.dtype, rngs=rngs)
 
         self.projector = Projector(
-            config.hidden_size, config.proj_hidden_dim, config.encoder_dim, rngs=rngs
+            config.hidden_size, config.proj_hidden_dim, config.encoder_dim,
+            rngs=rngs, dtype=config.dtype,
         )
 
 

@@ -9,7 +9,7 @@ from train import LeWM, TrainConfig, train
 
 
 LATENT_DIM = 96
-SEQ_LEN = 16
+SEQ_LEN = 4
 
 predicter_config = PredictorConfig(
     latent_dim=LATENT_DIM,
@@ -45,9 +45,9 @@ decoder_config = DecoderConfig(
 )
 
 train_config = TrainConfig(
-    adamw_lr=3e-4,
+    adamw_lr=5e-5,
     epochs=100,
-    batch_size=8,
+    batch_size=32,
     seq_len=SEQ_LEN,
     sigreg_lambda=0.4,
     recon_lambda=1.0,

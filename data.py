@@ -9,8 +9,21 @@ STARTS_PATH = "starts.npy"
 VIDEO_EXTS = {".mp4", ".mkv", ".webm", ".avi", ".mov"}
 
 
-def decode_video(video, skip=50.0, fps=10, size=224):
-    """Decode a video from `skip` seconds onward into a (N, size, size, 3) uint8 array."""
+def probe_fps(video):
+    """Native frame rate of `video`, as a float."""
+    cmd = [
+        "ffprobe", "-v", "error", "-select_streams", "v:0",
+        "-show_entries", "stream=r_frame_rate", "-of", "default=nw=1:nk=1", str(video),
+    ]
+    num, den = subprocess.run(cmd, capture_output=True, check=True, text=True).stdout.split("/")
+    return int(num) / int(den)
+
+
+def decode_video(video, skip=50.0, fps=None, size=224):
+    """Decode a video from `skip` seconds onward into a (N, size, size, 3) uint8 array.
+    Defaults to the video's native frame rate, capped at 60.
+    """
+    fps = fps or min(probe_fps(video), 60)
     cmd = [
         "ffmpeg", "-v", "error",
         "-ss", str(skip), "-i", str(video),
@@ -21,7 +34,7 @@ def decode_video(video, skip=50.0, fps=10, size=224):
     return np.frombuffer(raw, np.uint8).reshape(-1, size, size, 3)
 
 
-def build_dataset(video_dir, seq_len, skip=50.0, fps=10, size=224):
+def build_dataset(video_dir, seq_len, skip=50.0, fps=None, size=224):
     """Decode every video under `video_dir` into one concatenated frame array, and
     record which window-start indices stay within a single source clip -- so a
     sampled (seq_len)-frame window never straddles the cut between two videos.

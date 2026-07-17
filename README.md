@@ -8,9 +8,10 @@ A LeJEPA-style world model with a new take on planning.
 python main.py <dataset> [--run NAME] [--config overrides.json]
 ```
 
-- `<dataset>` is `breakout` or `tworooms`; it's built into `data/<dataset>/`
-  on first use. `breakout` ships with the repo; `tworooms` is downloaded from
-  HuggingFace automatically (~3.4 GB, once).
+- `<dataset>` is `breakout`, `tworooms`, or `pusht`; it's built into
+  `data/<dataset>/` on first use. `breakout` ships with the repo; the LeWM
+  environments (`tworooms`, `pusht`) are downloaded from HuggingFace
+  automatically on first use.
 - `--run NAME` names the run under `runs/NAME/`. Rerunning the same name
   resumes from its latest checkpoint; omit it and a timestamped run is created.
 - `--config` points at a JSON file of hyperparameter overrides applied when a

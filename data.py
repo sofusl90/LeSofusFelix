@@ -1,5 +1,6 @@
 import json
 import subprocess
+from functools import partial
 from pathlib import Path
 
 import jax.numpy as jnp
@@ -59,39 +60,47 @@ def build_breakout(root, video_dir="videos"):
     write_meta(root, 1, len(frames), video_dir)
 
 
-def fetch_tworooms_h5(dest=DATA_ROOT / "lewm-tworooms"):
-    """Return the LeWM TwoRoom source h5, downloading it from HuggingFace on
-    first use (the ~3.4 GB archive isn't in git). Idempotent: a present h5 is
-    returned untouched.
+# LeWM environments share one h5 layout (pixels, action, ep_offset, ep_len), so
+# one builder serves them all; each entry is (repo, archive, decompressed h5,
+# approximate download size).
+LEWM_SOURCES = {
+    "tworooms": ("quentinll/lewm-tworooms", "tworoom.tar.zst", "tworoom.h5", "3.4 GB"),
+    "pusht": ("quentinll/lewm-pusht", "pusht_expert_train.h5.zst", "pusht_expert_train.h5", "13 GB"),
+}
+
+
+def fetch_lewm_h5(repo, archive, h5_name, size, dest):
+    """Return a LeWM env's source h5, downloading and decompressing it from
+    HuggingFace on first use (the archives aren't in git). Idempotent.
     """
-    h5 = dest / "tworoom.h5"
+    h5 = dest / h5_name
     if not h5.exists():
         from huggingface_hub import hf_hub_download
 
         dest.mkdir(parents=True, exist_ok=True)
-        print("downloading tworooms source from HuggingFace (~3.4 GB)...")
-        archive = hf_hub_download(
-            "quentinll/lewm-tworooms", "tworoom.tar.zst",
-            repo_type="dataset", local_dir=dest,
-        )
-        print("extracting...")
-        subprocess.run(["tar", "--zstd", "-xf", archive, "-C", dest], check=True)
-        Path(archive).unlink()  # drop the transport archive; the h5 stays
+        print(f"downloading {repo} from HuggingFace ({size} archive)...")
+        archive_path = hf_hub_download(repo, archive, repo_type="dataset", local_dir=dest)
+        print("decompressing (this can take a few minutes, no progress shown)...")
+        if archive.endswith(".tar.zst"):
+            subprocess.run(["tar", "--zstd", "-xf", archive_path, "-C", dest], check=True)
+        else:  # a single zstd-compressed h5
+            subprocess.run(["zstd", "-d", "-f", archive_path], check=True)
+        Path(archive_path).unlink()  # drop the transport archive; the h5 stays
     return h5
 
 
-def build_tworooms(root, frame_skip=5):
-    """Re-materialize the LeWM TwoRoom h5 into the dataset contract: keep every
+def build_lewm(name, root, frame_skip=5):
+    """Re-materialize a LeWM env h5 into the dataset contract: keep every
     `frame_skip`-th frame per episode and concatenate the raw actions in between
     into one block per kept transition (the paper's action-block scheme). The
     h5's Blosc-compressed chunks are too slow for random access at train time,
-    hence this one-time sequential pass. Each episode's terminal NaN action is
-    never read: the last block ends one step before the final kept frame.
+    hence this one-time sequential pass. Each episode's last kept frame has no
+    successor, so its outgoing block is left zero-filled and never read.
     """
     import h5py
     import hdf5plugin  # noqa: F401 -- registers the Blosc filter h5py lacks
 
-    h5_path = fetch_tworooms_h5()
+    h5_path = fetch_lewm_h5(*LEWM_SOURCES[name], DATA_ROOT / f"lewm-{name}")
     f = h5py.File(h5_path, "r", rdcc_nbytes=32 * 2**20)
     pixels = f["pixels"]
     action = f["action"][:].astype(np.float32)
@@ -110,7 +119,7 @@ def build_tworooms(root, frame_skip=5):
         frames[episodes[i] : episodes[i + 1]] = pixels[off : off + ln][::frame_skip]
         blocks = action[idx[0] : idx[-1]].reshape(-1, block_dim)
         actions[episodes[i] : episodes[i] + len(blocks)] = blocks
-        if i % 500 == 0:
+        if i % 1000 == 0:
             print(f"episode {i}/{len(kept)}")
     frames.flush()
     assert np.isfinite(actions).all()
@@ -120,7 +129,10 @@ def build_tworooms(root, frame_skip=5):
     write_meta(root, block_dim, total, str(h5_path))
 
 
-BUILDERS = {"breakout": build_breakout, "tworooms": build_tworooms}
+BUILDERS = {
+    "breakout": build_breakout,
+    **{name: partial(build_lewm, name) for name in LEWM_SOURCES},
+}
 
 
 class Dataloader:

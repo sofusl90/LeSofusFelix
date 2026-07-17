@@ -107,22 +107,32 @@ of (seed, epoch)) but reads from `data/<dataset>/` and yields real actions.
 
 Per-dataset values in `main.py`; everything not listed is shared:
 
-| | breakout | tworooms |
-|---|---|---|
-| seq_len | 8 | 4 |
-| batch_size | 32 | 128 |
-| sigreg_lambda | 0.4 | 0.1 (paper) |
+| | breakout | tworooms | pusht |
+|---|---|---|---|
+| seq_len | 8 | 4 | 4 |
+| batch_size | 32 | 128 | 128 |
+| sigreg_lambda | 0.4 | 0.1 (paper) | 0.1 (paper) |
 
 (`action_dim` is not a preset — it comes from the dataset's `meta.json`:
-1 for breakout, 10 for tworooms.)
+1 for breakout, 10 for the LeWM envs.)
 
-tworooms matches the LeWM paper's TwoRoom recipe (224×224, T=4, B=128,
+tworooms and pusht match the LeWM paper's recipe (224×224, T=4, B=128,
 frame-skip 5 with action blocks, λ=0.1, per-timestep SIGReg) so results are
 comparable against the paper and its published checkpoints; if collapse
 persists at the paper's own settings on its own data, the bug is in our
 implementation (prime suspect: the paper's post-ViT projection uses BatchNorm
 and calls it necessary for SIGReg — check `encoder.py`'s projector; that check
 is part of this work's verification, not a code change committed blindly).
+
+The LeWM environments (tworooms, pusht) share one h5 layout (`pixels`,
+`action`, `ep_offset`, `ep_len`), so a single `build_lewm(name, ...)` builder
+and `fetch_lewm_h5` serve them all, driven by a `LEWM_SOURCES` registry
+mapping name → (repo, archive, h5). Adding another env (cube, reacher) is a
+registry entry plus a preset — no new builder. The only per-env wrinkle is the
+archive format (tworooms ships a `.tar.zst`, pusht a single `.h5.zst`), handled
+by suffix in `fetch_lewm_h5`. pusht carries no NaN actions (tworooms has a
+terminal NaN per episode); the builder excludes each episode's last outgoing
+block regardless, so both are handled and the `isfinite` assert holds.
 
 ## Dependencies
 

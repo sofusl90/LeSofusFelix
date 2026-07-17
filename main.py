@@ -22,8 +22,13 @@ PRESETS = {
         sigreg_lambda=0.4, recon_lambda=1.0, weight_decay=1e-3,
         grad_clip=1.0, warmup_steps=500,
     ),
-    # the LeWM paper's TwoRoom recipe: T=4, B=128, lambda=0.1
+    # the LeWM paper's recipe for both TwoRoom and PushT: T=4, B=128, lambda=0.1
     "tworooms": TrainConfig(
+        adamw_lr=5e-5, epochs=100, batch_size=128, seq_len=4,
+        sigreg_lambda=0.1, recon_lambda=1.0, weight_decay=1e-3,
+        grad_clip=1.0, warmup_steps=500,
+    ),
+    "pusht": TrainConfig(
         adamw_lr=5e-5, epochs=100, batch_size=128, seq_len=4,
         sigreg_lambda=0.1, recon_lambda=1.0, weight_decay=1e-3,
         grad_clip=1.0, warmup_steps=500,

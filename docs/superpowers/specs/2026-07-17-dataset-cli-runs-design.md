@@ -71,7 +71,7 @@ function into the same on-disk layout under `data/<dataset>/`, and a single
 ```
 data/<dataset>/frames.npy    # (N, 224, 224, 3) uint8, memmap'd at load
 data/<dataset>/actions.npy   # (N, A) float32 — action taken between frame i and i+1
-data/<dataset>/starts.npy    # (W,) int64 — window starts within one episode/clip
+data/<dataset>/episodes.npy  # (E+1,) int64 — cumulative episode frame offsets
 data/<dataset>/meta.json     # {"action_dim": A, "num_frames": N, "source": ...}
 ```
 
@@ -80,9 +80,16 @@ Actions are mandatory: a dataset without recorded actions must still emit
 from there into the predictor config — it is a property of the dataset, not a
 preset value, so the model and data can never disagree on it.
 
-- **breakout** (existing video path): `build_dataset` retargets its outputs to
-  `data/breakout/` and emits zero actions with A=1. Existing root
-  `frames.npy`/`starts.npy` can be moved there to skip a rebuild.
+Window starts are derived from `episodes.npy` by the `Dataloader` at load time,
+not baked at build time: baked starts would encode one `seq_len`, which
+`--config` can override, silently training on stale windows. The layout is thus
+seq_len-independent. The loader yields actions as `(B, T-1, A)` — the
+transitions inside the window — so an episode's final frame (whose outgoing
+block is the zero filler) is never consumed.
+
+- **breakout** (existing video path): `build_breakout` writes its outputs under
+  `data/breakout/` and emits zero actions with A=1, with one episode span per
+  source clip.
 - **tworooms** (new): read `tworoom.h5` (`h5py` + `hdf5plugin`, imported only
   inside the build function) sequentially — random access into the Blosc
   chunks is ~5.5 s per batch, hence the one-time re-materialization. Apply the
@@ -90,13 +97,11 @@ preset value, so the model and data can never disagree on it.
   …; `actions.npy[i]` = the 5 raw 2-D actions between kept frame i and i+1,
   concatenated (A=10). The episode-terminal NaN action is never included by
   construction (it has no successor frame). Trailing steps that don't fill a
-  5-action block are dropped. Result: ~184k frames (~27.7 GB), ~154k windows.
-  Window starts are stride-aligned — 5× fewer than the paper's arbitrary
-  offsets, still exceeding the ~128k samples a 10-epoch run draws.
+  5-action block leave a zero-filled row that the loader never reads. Actual
+  build: 190,562 frames (~27 GB), 10,000 episodes, 160,562 windows at T=4.
 
 `Dataloader` keeps its current contract (re-iterable, batches a pure function
-of (seed, epoch)) but reads the triple from `data/<dataset>/` and yields real
-actions.
+of (seed, epoch)) but reads from `data/<dataset>/` and yields real actions.
 
 ## Presets
 
